@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Creator & URL Shortener</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='50' font-size='50' fill='%23007bff' dominant-baseline='middle'>⚡</text></svg>">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>⚡ QR & Link Hub</h1>
+                <p>Create QR codes & shorten URLs</p>
+            </div>
+            <button class="theme-toggle" id="themeToggle">🌙</button>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Navigation Tabs -->
+            <div class="nav-tabs">
+                <button class="tab-btn active" data-tab="qr-tab">QR Code</button>
+                <button class="tab-btn" data-tab="shortener-tab">URL Shortener</button>
+                <button class="tab-btn" data-tab="dashboard-tab">Dashboard</button>
+            </div>
+
+            <!-- QR Code Generator Tab -->
+            <div id="qr-tab" class="tab-content active">
+                <div class="card">
+                    <h2>Generate QR Code</h2>
+                    <div class="form-group">
+                        <label for="qrInput">Enter URL or Text:</label>
+                        <textarea id="qrInput" placeholder="https://example.com or any text..." rows="3"></textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="qrSize">QR Size:</label>
+                            <input type="range" id="qrSize" min="5" max="20" value="10">
+                            <span id="qrSizeValue">10</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="qrErrorLevel">Error Correction:</label>
+                            <select id="qrErrorLevel">
+                                <option value="L">Low (7%)</option>
+                                <option value="M" selected>Medium (15%)</option>
+                                <option value="Q">Quartile (25%)</option>
+                                <option value="H">High (30%)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="generateQrBtn">Generate QR Code</button>
+                </div>
+
+                <div id="qrResult" class="card hidden">
+                    <h3>Your QR Code</h3>
+                    <div class="qr-display">
+                        <img id="qrImage" src="" alt="Generated QR Code">
+                    </div>
+                    <div class="button-group">
+                        <button class="btn btn-secondary" id="downloadQrBtn">⬇️ Download</button>
+                        <button class="btn btn-secondary" id="copyQrBtn">📋 Copy to Clipboard</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- URL Shortener Tab -->
+            <div id="shortener-tab" class="tab-content">
+                <div class="card">
+                    <h2>Shorten Your URL</h2>
+                    <div class="form-group">
+                        <label for="urlInput">Enter URL:</label>
+                        <input type="url" id="urlInput" placeholder="https://example.com/very/long/url" />
+                    </div>
+                    <div class="form-group">
+                        <label for="customCode">Custom Short Code (Optional):</label>
+                        <input type="text" id="customCode" placeholder="e.g., mycode" />
+                        <small>3-20 characters, alphanumeric, hyphens, underscores</small>
+                    </div>
+                    <button class="btn btn-primary" id="shortenBtn">Shorten URL</button>
+                </div>
+
+                <div id="shortenerResult" class="card hidden">
+                    <h3>Your Shortened URL</h3>
+                    <div class="result-grid">
+                        <div class="result-item">
+                            <label>Original URL:</label>
+                            <p id="originalUrlDisplay" class="url-display"></p>
+                        </div>
+                        <div class="result-item">
+                            <label>Short URL:</label>
+                            <input type="text" id="shortUrlDisplay" class="url-display" readonly />
+                            <button class="btn btn-small" id="copyUrlBtn">📋 Copy</button>
+                        </div>
+                        <div class="result-item">
+                            <label>QR Code for Short URL:</label>
+                            <img id="shortUrlQr" src="" alt="QR Code for short URL" style="width: 150px;">
+                            <button class="btn btn-small" id="downloadShortQrBtn">⬇️ Download</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dashboard Tab -->
+            <div id="dashboard-tab" class="tab-content">
+                <div class="card">
+                    <div class="dashboard-header">
+                        <h2>Your Links</h2>
+                        <button class="btn btn-secondary" id="refreshDashboardBtn">🔄 Refresh</button>
+                    </div>
+                    <div id="dashboardContent" class="dashboard-content">
+                        <p class="loading">Loading...</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="loading-spinner hidden">
+        <div class="spinner"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

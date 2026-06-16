@@ -1,176 +1,145 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const { MongoClient } = require('mongodb');
 require('dotenv').config();
 
-const DB_PATH = process.env.DB_PATH || './db.sqlite';
-const db = new sqlite3.Database(DB_PATH);
+const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://nivekversedev:Kcc0092$$@cluster0.dyrqifm.mongodb.net/?appName=Cluster0';
+const DB_NAME = 'qr_shortener';
 
-// Promisify database operations
-const run = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function(err) {
-      if (err) reject(err);
-      else resolve(this);
-    });
-  });
-};
+let db = null;
+let client = null;
 
-const get = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
-};
-
-const all = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows || []);
-    });
-  });
-};
-
-// Initialize database tables
-const initialize = () => {
-  db.serialize(() => {
-    // Shortened URLs table
-    db.run(`
-      CREATE TABLE IF NOT EXISTS shortened_urls (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        code TEXT UNIQUE NOT NULL,
-        originalUrl TEXT NOT NULL,
-        clicks INTEGER DEFAULT 0,
-        created DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // QR Codes history table
-    db.run(`
-      CREATE TABLE IF NOT EXISTS qr_codes (
-        id TEXT PRIMARY KEY,
-        data TEXT NOT NULL,
-        size INTEGER DEFAULT 10,
-        created DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // Create indexes for better query performance
-    db.run(`CREATE INDEX IF NOT EXISTS idx_code ON shortened_urls(code)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_created ON shortened_urls(created DESC)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_qr_created ON qr_codes(created DESC)`);
-
-    console.log('✅ Database initialized successfully');
-  });
+const initialize = async () => {
+  try {
+    client = new MongoClient(MONGO_URI);
+    await client.connect();
+    db = client.db(DB_NAME);
+    
+    // Create collections if they don't exist
+    await db.createCollection('shortened_urls').catch(() => {});
+    await db.createCollection('qr_codes').catch(() => {});
+    
+    // Create indexes
+    await db.collection('shortened_urls').createIndex({ code: 1 }, { unique: true }).catch(() => {});
+    await db.collection('shortened_urls').createIndex({ created: -1 }).catch(() => {});
+    await db.collection('qr_codes').createIndex({ created: -1 }).catch(() => {});
+    
+    console.log('✅ MongoDB connected successfully');
+  } catch (error) {
+    console.error('❌ MongoDB connection error:', error);
+    throw error;
+  }
 };
 
 // ==================== SHORTENED URL FUNCTIONS ====================
 
-const saveShortenedUrl = (code, originalUrl) => {
-  return new Promise((resolve, reject) => {
-    db.run(
-      `INSERT INTO shortened_urls (code, originalUrl) VALUES (?, ?)`,
-      [code, originalUrl],
-      function(err) {
-        if (err) reject(err);
-        else resolve(this.lastID);
-      }
-    );
-  });
+const saveShortenedUrl = async (code, originalUrl) => {
+  try {
+    const result = await db.collection('shortened_urls').insertOne({
+      code,
+      originalUrl,
+      clicks: 0,
+      created: new Date(),
+      updated: new Date()
+    });
+    return result.insertedId;
+  } catch (error) {
+    console.error('Error saving URL:', error);
+    throw error;
+  }
 };
 
-const getUrlData = (code) => {
-  return new Promise((resolve, reject) => {
-    db.get(
-      `SELECT * FROM shortened_urls WHERE code = ?`,
-      [code],
-      (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      }
-    );
-  });
+const getUrlData = async (code) => {
+  try {
+    return await db.collection('shortened_urls').findOne({ code });
+  } catch (error) {
+    console.error('Error getting URL data:', error);
+    throw error;
+  }
 };
 
-const codeExists = (code) => {
-  return new Promise((resolve, reject) => {
-    db.get(
-      `SELECT 1 FROM shortened_urls WHERE code = ? LIMIT 1`,
-      [code],
-      (err, row) => {
-        if (err) reject(err);
-        else resolve(!!row);
-      }
-    );
-  });
+const codeExists = async (code) => {
+  try {
+    const result = await db.collection('shortened_urls').findOne({ code });
+    return !!result;
+  } catch (error) {
+    console.error('Error checking code:', error);
+    throw error;
+  }
 };
 
-const getAllUrls = () => {
-  return new Promise((resolve, reject) => {
-    db.all(
-      `SELECT code, originalUrl, clicks, created FROM shortened_urls ORDER BY created DESC`,
-      (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      }
-    );
-  });
+const getAllUrls = async () => {
+  try {
+    return await db.collection('shortened_urls')
+      .find({})
+      .sort({ created: -1 })
+      .toArray();
+  } catch (error) {
+    console.error('Error getting all URLs:', error);
+    throw error;
+  }
 };
 
-const incrementClicks = (code) => {
-  return new Promise((resolve, reject) => {
-    db.run(
-      `UPDATE shortened_urls SET clicks = clicks + 1, updated = CURRENT_TIMESTAMP WHERE code = ?`,
-      [code],
-      function(err) {
-        if (err) reject(err);
-        else resolve(this.changes);
+const incrementClicks = async (code) => {
+  try {
+    const result = await db.collection('shortened_urls').updateOne(
+      { code },
+      { 
+        $inc: { clicks: 1 },
+        $set: { updated: new Date() }
       }
     );
-  });
+    return result.modifiedCount;
+  } catch (error) {
+    console.error('Error incrementing clicks:', error);
+    throw error;
+  }
 };
 
-const deleteShortenedUrl = (code) => {
-  return new Promise((resolve, reject) => {
-    db.run(
-      `DELETE FROM shortened_urls WHERE code = ?`,
-      [code],
-      function(err) {
-        if (err) reject(err);
-        else resolve(this.changes > 0);
-      }
-    );
-  });
+const deleteShortenedUrl = async (code) => {
+  try {
+    const result = await db.collection('shortened_urls').deleteOne({ code });
+    return result.deletedCount > 0;
+  } catch (error) {
+    console.error('Error deleting URL:', error);
+    throw error;
+  }
 };
 
 // ==================== QR CODE FUNCTIONS ====================
 
-const saveQRCode = (id, data, size) => {
-  return new Promise((resolve, reject) => {
-    db.run(
-      `INSERT INTO qr_codes (id, data, size) VALUES (?, ?, ?)`,
-      [id, data, size],
-      function(err) {
-        if (err) reject(err);
-        else resolve(this.lastID);
-      }
-    );
-  });
+const saveQRCode = async (id, data, size) => {
+  try {
+    const result = await db.collection('qr_codes').insertOne({
+      _id: id,
+      data,
+      size,
+      created: new Date()
+    });
+    return result.insertedId;
+  } catch (error) {
+    console.error('Error saving QR code:', error);
+    throw error;
+  }
 };
 
-const getQRCodeHistory = () => {
-  return new Promise((resolve, reject) => {
-    db.all(
-      `SELECT id, data, size, created FROM qr_codes ORDER BY created DESC LIMIT 50`,
-      (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      }
-    );
-  });
+const getQRCodeHistory = async () => {
+  try {
+    return await db.collection('qr_codes')
+      .find({})
+      .sort({ created: -1 })
+      .limit(50)
+      .toArray();
+  } catch (error) {
+    console.error('Error getting QR history:', error);
+    throw error;
+  }
+};
+
+// Close connection
+const closeConnection = async () => {
+  if (client) {
+    await client.close();
+    console.log('MongoDB connection closed');
+  }
 };
 
 module.exports = {
@@ -182,5 +151,6 @@ module.exports = {
   incrementClicks,
   deleteShortenedUrl,
   saveQRCode,
-  getQRCodeHistory
+  getQRCodeHistory,
+  closeConnection
 };

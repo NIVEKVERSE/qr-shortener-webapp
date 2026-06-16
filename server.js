@@ -3,6 +3,7 @@ const path = require('path');
 const QRCode = require('qrcode');
 const { v4: uuidv4 } = require('uuid');
 const rateLimit = require('express-rate-limit');
+const cors = require('cors');
 require('dotenv').config();
 
 const db = require('./src/database');
@@ -13,20 +14,24 @@ const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
 // Middleware
+app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW) * 60 * 1000,
-  max: parseInt(process.env.RATE_LIMIT_MAX),
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW || 15) * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MAX || 100),
   message: 'Too many requests, please try again later.'
 });
 app.use('/api/', limiter);
 
 // Initialize database
-db.initialize();
+db.initialize().catch(err => {
+  console.error('Failed to initialize database:', err);
+  process.exit(1);
+});
 
 // ==================== QR CODE ENDPOINTS ====================
 
@@ -56,7 +61,7 @@ app.post('/api/qr/generate', async (req, res) => {
     });
 
     const id = uuidv4();
-    db.saveQRCode(id, data, size);
+    await db.saveQRCode(id, data, size);
 
     res.json({
       success: true,
@@ -77,9 +82,9 @@ app.post('/api/qr/generate', async (req, res) => {
  * GET /api/qr/history
  * Get QR code generation history
  */
-app.get('/api/qr/history', (req, res) => {
+app.get('/api/qr/history', async (req, res) => {
   try {
-    const history = db.getQRCodeHistory();
+    const history = await db.getQRCodeHistory();
     res.json({
       success: true,
       data: history
@@ -119,7 +124,7 @@ app.post('/api/shorten', async (req, res) => {
     let shortCode = customCode || generateShortCode();
 
     // Check if code already exists
-    if (db.codeExists(shortCode)) {
+    if (await db.codeExists(shortCode)) {
       return res.status(409).json({
         success: false,
         error: 'Short code already exists. Try a different one.'
@@ -127,7 +132,7 @@ app.post('/api/shorten', async (req, res) => {
     }
 
     // Create the shortened URL
-    db.saveShortenedUrl(shortCode, originalUrl);
+    await db.saveShortenedUrl(shortCode, originalUrl);
 
     // Generate QR code for shortened URL
     const shortUrl = `${BASE_URL}/s/${shortCode}`;
@@ -162,7 +167,7 @@ app.post('/api/shorten', async (req, res) => {
 app.get('/api/info/:code', async (req, res) => {
   try {
     const { code } = req.params;
-    const urlData = db.getUrlData(code);
+    const urlData = await db.getUrlData(code);
 
     if (!urlData) {
       return res.status(404).json({
@@ -195,9 +200,9 @@ app.get('/api/info/:code', async (req, res) => {
  * GET /api/list
  * List all shortened URLs
  */
-app.get('/api/list', (req, res) => {
+app.get('/api/list', async (req, res) => {
   try {
-    const urls = db.getAllUrls();
+    const urls = await db.getAllUrls();
     res.json({
       success: true,
       data: urls.map(url => ({
@@ -220,10 +225,10 @@ app.get('/api/list', (req, res) => {
  * DELETE /api/delete/:code
  * Delete a shortened URL
  */
-app.delete('/api/delete/:code', (req, res) => {
+app.delete('/api/delete/:code', async (req, res) => {
   try {
     const { code } = req.params;
-    const success = db.deleteShortenedUrl(code);
+    const success = await db.deleteShortenedUrl(code);
 
     if (!success) {
       return res.status(404).json({
@@ -250,17 +255,17 @@ app.delete('/api/delete/:code', (req, res) => {
  * GET /s/:code
  * Redirect to original URL
  */
-app.get('/s/:code', (req, res) => {
+app.get('/s/:code', async (req, res) => {
   try {
     const { code } = req.params;
-    const urlData = db.getUrlData(code);
+    const urlData = await db.getUrlData(code);
 
     if (!urlData) {
       return res.status(404).send('Short code not found');
     }
 
     // Increment click counter
-    db.incrementClicks(code);
+    await db.incrementClicks(code);
 
     // Redirect to original URL
     res.redirect(urlData.originalUrl);
@@ -290,8 +295,20 @@ app.use((req, res) => {
 
 // ==================== SERVER START ====================
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 Server running at ${BASE_URL}`);
   console.log(`📊 API available at ${BASE_URL}/api`);
-  console.log(`🌐 Node environment: ${process.env.NODE_ENV}`);
+  console.log(`🌍 Node environment: ${process.env.NODE_ENV}`);
 });
+
+// Handle graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully...');
+  server.close(async () => {
+    await db.closeConnection();
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+module.exports = app;
